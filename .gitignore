@@ -1,0 +1,36 @@
+# Binários
+poc-camera
+*.exe
+
+# Arquivos de build do Go
+*.o
+*.a
+*.so
+
+# Arquivos de teste
+*.test
+*.prof
+
+# Dependências de vendor
+vendor/
+
+# Arquivos do sistema
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Arquivos temporários
+*.tmp
+*.temp
+
+# Modelos grandes (opcional - descomente se não quiser versionar)
+# models/*.weights
+# models/*.onnx
