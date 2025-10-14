@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wget:*)",
+      "Bash(go build:*)",
+      "Bash(make run:*)",
+      "Bash(pkill:*)",
+      "Bash(go run:*)",
+      "Bash(go list:*)",
+      "Bash(go get:*)",
+      "Bash(brew list:*)",
+      "Bash(opencv_version:*)",
+      "Bash(timeout 8s go run:*)",
+      "Bash(timeout:*)",
+      "Bash(gtimeout:*)",
+      "mcp__browsermcp__browser_navigate",
+      "WebFetch(domain:github.com)",
+      "Bash(curl:*)",
+      "Bash(cat:*)",
+      "Bash(python3:*)",
+      "Bash(pip3 install:*)",
+      "Bash(./poc-camera:*)",
+      "WebFetch(domain:docs.ultralytics.com)",
+      "Bash(pip3:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
