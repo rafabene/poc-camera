@@ -11,29 +11,242 @@ import (
 	"gocv.io/x/gocv"
 )
 
+// Configuração do modelo YOLOv11 Object365
 const (
-	// YOLOv11n Object365 (365 classes - dataset muito mais abrangente)
 	modelWeights        = "models/yolo11n_object365.onnx"
 	classNamesFile      = "models/object365.names"
-	confidenceThreshold = 0.5  // Threshold balanceado para detectar objetos
-	nmsThreshold        = 0.4  // NMS balanceado
-	minObjectSize       = 50   // Objetos menores permitidos
-	maxValidClassID     = 364  // Object365 dataset tem classes 0-364 (365 classes total)
+	confidenceThreshold = 0.25 // Threshold para detectar objetos
+	nmsThreshold        = 0.4  // NMS padrão
+	minObjectSize       = 20   // Tamanho mínimo dos objetos
+	maxValidClassID     = 364  // Object365: 365 classes (0-364)
+
+	// Configurações da aplicação
+	windowName    = "POC Camera - YOLOv11 Object365 Detection"
+	inputSize     = 640    // Tamanho da entrada do modelo
+	numDetections = 8400   // Número de detecções do YOLOv11
+	numAttributes = 369    // 4 coordenadas + 365 classes Object365
 )
 
-// generateClassColor gera uma cor única para cada classe baseada no ID da classe
-func generateClassColor(classID int) color.RGBA {
-	// Usa o ID da classe para gerar uma cor consistente
-	h := float64(classID*137%360) / 360.0 // Hue baseado no ID da classe
-	s := 0.7                              // Saturação fixa
-	v := 0.9                              // Valor (brilho) fixo
+// DetectionResult representa uma detecção de objeto
+type DetectionResult struct {
+	ClassID    int
+	Confidence float32
+	Box        image.Rectangle
+	Label      string
+}
 
-	// Converte HSV para RGB
+// YOLODetector encapsula a lógica de detecção
+type YOLODetector struct {
+	net        gocv.Net
+	classNames []string
+}
+
+// NewYOLODetector cria um novo detector YOLO
+func NewYOLODetector() (*YOLODetector, error) {
+	// Carrega a rede neural
+	net := gocv.ReadNetFromONNX(modelWeights)
+	if net.Empty() {
+		return nil, fmt.Errorf("erro ao carregar modelo: %s", modelWeights)
+	}
+
+	// Configura backend e target
+	if err := net.SetPreferableBackend(gocv.NetBackendDefault); err != nil {
+		return nil, fmt.Errorf("erro ao configurar backend: %v", err)
+	}
+	if err := net.SetPreferableTarget(gocv.NetTargetCPU); err != nil {
+		return nil, fmt.Errorf("erro ao configurar target: %v", err)
+	}
+
+	// Carrega nomes das classes
+	classNames, err := loadClassNames(classNamesFile)
+	if err != nil {
+		return nil, fmt.Errorf("erro ao carregar classes: %v", err)
+	}
+
+	return &YOLODetector{
+		net:        net,
+		classNames: classNames,
+	}, nil
+}
+
+// Close libera os recursos do detector
+func (d *YOLODetector) Close() {
+	d.net.Close()
+}
+
+// Detect executa detecção em uma imagem
+func (d *YOLODetector) Detect(img gocv.Mat) []DetectionResult {
+	// Prepara entrada para o modelo
+	blob := gocv.BlobFromImage(img, 1.0/255.0, image.Pt(inputSize, inputSize),
+		gocv.NewScalar(0, 0, 0, 0), true, false)
+	defer blob.Close()
+
+	// Executa inferência
+	d.net.SetInput(blob, "")
+	output := d.net.Forward("")
+	defer output.Close()
+
+	// Processa detecções
+	return d.processDetections(output, img.Cols(), img.Rows())
+}
+
+// processDetections converte saída do modelo em detecções válidas
+func (d *YOLODetector) processDetections(output gocv.Mat, frameWidth, frameHeight int) []DetectionResult {
+	data, _ := output.DataPtrFloat32()
+
+	var rawDetections []DetectionResult
+	scaleX := float32(frameWidth) / float32(inputSize)
+	scaleY := float32(frameHeight) / float32(inputSize)
+
+	// Processa todas as detecções
+	for i := 0; i < numDetections; i++ {
+		detection := d.parseDetection(data, i, scaleX, scaleY, frameWidth, frameHeight)
+		if detection != nil {
+			rawDetections = append(rawDetections, *detection)
+		}
+	}
+
+	// Aplica Non-Maximum Suppression
+	return d.applyNMS(rawDetections)
+}
+
+// parseDetection extrai uma detecção individual dos dados brutos
+func (d *YOLODetector) parseDetection(data []float32, index int, scaleX, scaleY float32, frameWidth, frameHeight int) *DetectionResult {
+	// Extrai coordenadas (formato transposto)
+	centerX := data[0*numDetections + index]
+	centerY := data[1*numDetections + index]
+	width := data[2*numDetections + index]
+	height := data[3*numDetections + index]
+
+	// Encontra classe com maior confiança
+	classID, confidence := d.findBestClass(data, index)
+
+	// Valida detecção
+	if classID < 0 || classID > maxValidClassID || confidence < confidenceThreshold {
+		return nil
+	}
+
+	// Converte coordenadas para pixels
+	box := d.convertToPixelCoordinates(centerX, centerY, width, height,
+		scaleX, scaleY, frameWidth, frameHeight)
+
+	// Filtra objetos muito pequenos
+	if box.Dx() < minObjectSize || box.Dy() < minObjectSize {
+		return nil
+	}
+
+	// Cria label
+	label := fmt.Sprintf("%s: %.2f", d.classNames[classID], confidence)
+
+	return &DetectionResult{
+		ClassID:    classID,
+		Confidence: confidence,
+		Box:        box,
+		Label:      label,
+	}
+}
+
+// findBestClass encontra a classe com maior confiança
+func (d *YOLODetector) findBestClass(data []float32, index int) (int, float32) {
+	var bestClassID int
+	var maxScore float32
+
+	// Verifica se temos dados suficientes
+	dataLength := len(data)
+	maxIndex := (numAttributes - 1) * numDetections + index
+
+	if maxIndex >= dataLength {
+		// Se não temos dados suficientes, retorna valores padrão
+		return 0, 0.0
+	}
+
+	for j := 4; j < numAttributes; j++ {
+		dataIndex := j*numDetections + index
+		if dataIndex < dataLength {
+			score := data[dataIndex]
+			if score > maxScore {
+				maxScore = score
+				bestClassID = j - 4 // classes 0-364
+			}
+		}
+	}
+
+	return bestClassID, maxScore
+}
+
+// convertToPixelCoordinates converte coordenadas normalizadas para pixels
+func (d *YOLODetector) convertToPixelCoordinates(centerX, centerY, width, height, scaleX, scaleY float32, frameWidth, frameHeight int) image.Rectangle {
+	// Converte para coordenadas de pixel
+	pixelCenterX := int(centerX * scaleX)
+	pixelCenterY := int(centerY * scaleY)
+	pixelWidth := int(width * scaleX)
+	pixelHeight := int(height * scaleY)
+
+	// Calcula coordenadas da caixa
+	left := pixelCenterX - pixelWidth/2
+	top := pixelCenterY - pixelHeight/2
+
+	// Garante que está dentro dos limites da imagem
+	left = max(0, left)
+	top = max(0, top)
+	right := min(frameWidth, left+pixelWidth)
+	bottom := min(frameHeight, top+pixelHeight)
+
+	return image.Rect(left, top, right, bottom)
+}
+
+// applyNMS aplica Non-Maximum Suppression para remover detecções duplicadas
+func (d *YOLODetector) applyNMS(detections []DetectionResult) []DetectionResult {
+	if len(detections) == 0 {
+		return detections
+	}
+
+	// Prepara dados para NMS
+	var boxes []image.Rectangle
+	var confidences []float32
+
+	for _, det := range detections {
+		boxes = append(boxes, det.Box)
+		confidences = append(confidences, det.Confidence)
+	}
+
+	// Aplica NMS
+	indices := gocv.NMSBoxes(boxes, confidences, confidenceThreshold, nmsThreshold)
+
+	// Retorna apenas detecções válidas
+	var result []DetectionResult
+	for _, idx := range indices {
+		result = append(result, detections[idx])
+	}
+
+	return result
+}
+
+// DrawDetections desenha as detecções na imagem
+func DrawDetections(img *gocv.Mat, detections []DetectionResult) {
+	for _, det := range detections {
+		// Gera cor única para a classe
+		color := generateClassColor(det.ClassID)
+
+		// Desenha retângulo e label
+		gocv.Rectangle(img, det.Box, color, 3)
+		gocv.PutText(img, det.Label,
+			image.Pt(det.Box.Min.X, det.Box.Min.Y-5),
+			gocv.FontHersheySimplex, 0.7, color, 2)
+	}
+}
+
+// generateClassColor gera uma cor única para cada classe
+func generateClassColor(classID int) color.RGBA {
+	h := float64(classID*137%360) / 360.0 // Hue baseado no ID
+	s := 0.7                              // Saturação fixa
+	v := 0.9                              // Brilho fixo
+
 	r, g, b := hsvToRGB(h, s, v)
 	return color.RGBA{uint8(r * 255), uint8(g * 255), uint8(b * 255), 255}
 }
 
-// hsvToRGB converte valores HSV para RGB
+// hsvToRGB converte HSV para RGB
 func hsvToRGB(h, s, v float64) (float64, float64, float64) {
 	c := v * s
 	x := c * (1 - math.Abs(math.Mod(h*6, 2)-1))
@@ -58,196 +271,8 @@ func hsvToRGB(h, s, v float64) (float64, float64, float64) {
 	return r + m, g + m, b + m
 }
 
-func main() {
-	webcam, err := gocv.VideoCaptureDevice(0)
-	if err != nil {
-		fmt.Printf("Erro ao abrir a webcam: %v\n", err)
-		os.Exit(1)
-	}
-	defer webcam.Close()
-
-	// Cria a janela
-	windowName := "POC Camera"
-	window := gocv.NewWindow(windowName)
-	defer window.Close()
-
-	// Tenta habilitar os controles da janela (pode não funcionar em todos os sistemas)
-	window.SetWindowProperty(gocv.WindowPropertyFullscreen, gocv.WindowNormal)
-
-	img := gocv.NewMat()
-	defer img.Close()
-
-	// Carrega a rede neural YOLOv11 (ONNX)
-	net := gocv.ReadNetFromONNX(modelWeights)
-
-	if net.Empty() {
-		fmt.Printf("Erro ao ler a rede neural: %s\n", modelWeights)
-		os.Exit(1)
-	}
-	defer net.Close()
-
-	if err := net.SetPreferableBackend(gocv.NetBackendDefault); err != nil {
-		fmt.Printf("Erro ao definir o backend: %v\n", err)
-	}
-	if err := net.SetPreferableTarget(gocv.NetTargetCPU); err != nil {
-		fmt.Printf("Erro ao definir o alvo: %v\n", err)
-	}
-
-	classNames, err := readClassNames(classNamesFile)
-	if err != nil {
-		fmt.Printf("Erro ao ler os nomes das classes: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Println("🚀 Usando YOLOv11n Object365 (365 classes - dataset muito mais abrangente)")
-	fmt.Println("Pressione ESC ou Q para sair (ou use Cmd+Q para forçar o fechamento).")
-
-	for {
-		if ok := webcam.Read(&img); !ok {
-			fmt.Println("Não foi possível ler o quadro da webcam.")
-			break
-		}
-		if img.Empty() {
-			continue
-		}
-
-		// YOLOv11 usa entrada 640x640
-		inputSize := image.Pt(640, 640)
-		blob := gocv.BlobFromImage(img, 1.0/255.0, inputSize, gocv.NewScalar(0, 0, 0, 0), true, false)
-
-		net.SetInput(blob, "")
-
-		blob.Close()
-
-		// Executa inferência do YOLOv11
-		output := net.Forward("")
-		outputs := []gocv.Mat{output}
-
-		// Processa detecções do YOLOv11
-		performDetection(img, outputs, classNames)
-
-		for i := range outputs {
-			outputs[i].Close()
-		}
-
-		window.IMShow(img)
-
-		// Verifica teclas pressionadas
-		key := window.WaitKey(30)
-		if key == 27 {  // ESC
-			break
-		}
-		if key == 'q' || key == 'Q' {  // Q para quit
-			break
-		}
-
-		// Verifica se a janela ainda existe (detecção alternativa de fechamento)
-		if !window.IsOpen() {
-			break
-		}
-	}
-}
-
-func performDetection(frame gocv.Mat, results []gocv.Mat, classNames []string) {
-	var classIDs []int
-	var confidences []float32
-	var boxes []image.Rectangle
-
-	for _, result := range results {
-		data, _ := result.DataPtrFloat32()
-
-		// YOLOv11 Object365 formato: [369, 8400] onde data = 3,099,600 elementos
-		// Formato transposto: primeiro todos os x, depois todos os y, etc.
-		// data[0...8399] = x coords, data[8400...16799] = y coords, etc.
-
-		// Processa todas as 8400 detecções do formato transposto
-		for i := 0; i < 8400; i++ {
-			// YOLOv11 formato transposto: data[atributo * 8400 + detecção]
-			centerX := data[0*8400 + i]  // x
-			centerY := data[1*8400 + i]  // y
-			width := data[2*8400 + i]    // w
-			height := data[3*8400 + i]   // h
-
-			// Classes: atributos 4-368 (365 classes Object365)
-			var classID int
-			var maxClassScore float32
-			for j := 4; j < 369; j++ {
-				classScore := data[j*8400 + i]
-				if classScore > maxClassScore {
-					maxClassScore = classScore
-					classID = j - 4  // classID correto: 0-364
-				}
-			}
-
-			finalConfidence := maxClassScore
-
-			// Filtros básicos
-			if classID < 0 || classID > maxValidClassID {
-				continue
-			}
-
-			if finalConfidence > float32(confidenceThreshold) {
-				frameWidth := frame.Cols()
-				frameHeight := frame.Rows()
-
-				// YOLOv11 retorna coordenadas no espaço da imagem de entrada (640x640)
-				// Precisa mapear de 640x640 para as dimensões reais do frame
-				scaleX := float32(frameWidth) / 640.0
-				scaleY := float32(frameHeight) / 640.0
-
-				pixelCenterX := int(centerX * scaleX)
-				pixelCenterY := int(centerY * scaleY)
-				pixelWidth := int(width * scaleX)
-				pixelHeight := int(height * scaleY)
-
-				left := pixelCenterX - pixelWidth/2
-				top := pixelCenterY - pixelHeight/2
-
-				// Garantir que as coordenadas estão dentro do frame
-				if left < 0 { left = 0 }
-				if top < 0 { top = 0 }
-				if left+pixelWidth > frameWidth { pixelWidth = frameWidth - left }
-				if top+pixelHeight > frameHeight { pixelHeight = frameHeight - top }
-
-				// Filtrar objetos muito pequenos (reduz ruído)
-				if pixelWidth < minObjectSize || pixelHeight < minObjectSize {
-					continue
-				}
-
-				classIDs = append(classIDs, classID)
-				confidences = append(confidences, finalConfidence)
-				boxes = append(boxes, image.Rect(left, top, left+pixelWidth, top+pixelHeight))
-			}
-		}
-	}
-
-	if len(boxes) == 0 {
-		return
-	}
-
-	indices := gocv.NMSBoxes(boxes, confidences, confidenceThreshold, nmsThreshold)
-
-	for _, idx := range indices {
-		box := boxes[idx]
-		classID := classIDs[idx]
-
-		// Proteção adicional: verificar se classID é válido para o array classNames
-		if classID < 0 || classID >= len(classNames) {
-			continue
-		}
-
-		label := fmt.Sprintf("%s: %.2f", classNames[classID], confidences[idx])
-
-		// Gera uma cor única para cada classe de objeto
-		objColor := generateClassColor(classID)
-
-		// Desenha um quadrado colorido para o objeto detectado
-		gocv.Rectangle(&frame, box, objColor, 3)
-		gocv.PutText(&frame, label, image.Pt(box.Min.X, box.Min.Y-5), gocv.FontHersheySimplex, 0.7, objColor, 2)
-	}
-}
-
-func readClassNames(filename string) ([]string, error) {
+// loadClassNames carrega os nomes das classes do arquivo
+func loadClassNames(filename string) ([]string, error) {
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, err
@@ -260,4 +285,111 @@ func readClassNames(filename string) ([]string, error) {
 		lines = append(lines, scanner.Text())
 	}
 	return lines, scanner.Err()
+}
+
+// setupCamera inicializa e configura a câmera
+func setupCamera() (*gocv.VideoCapture, error) {
+	webcam, err := gocv.VideoCaptureDevice(0)
+	if err != nil {
+		return nil, fmt.Errorf("erro ao abrir webcam: %v", err)
+	}
+	return webcam, nil
+}
+
+// setupWindow cria e configura a janela de visualização
+func setupWindow() *gocv.Window {
+	window := gocv.NewWindow(windowName)
+	window.SetWindowProperty(gocv.WindowPropertyFullscreen, gocv.WindowNormal)
+	return window
+}
+
+// handleInput verifica input do usuário para sair
+func handleInput(window *gocv.Window) bool {
+	key := window.WaitKey(30)
+
+	// ESC ou Q para sair
+	if key == 27 || key == 'q' || key == 'Q' {
+		return true
+	}
+
+	// Verifica se janela foi fechada
+	if !window.IsOpen() {
+		return true
+	}
+
+	return false
+}
+
+// Funções utilitárias
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func main() {
+	// Inicializa detector
+	detector, err := NewYOLODetector()
+	if err != nil {
+		fmt.Printf("Erro ao inicializar detector: %v\n", err)
+		os.Exit(1)
+	}
+	defer detector.Close()
+
+	// Configura câmera
+	webcam, err := setupCamera()
+	if err != nil {
+		fmt.Printf("Erro na câmera: %v\n", err)
+		os.Exit(1)
+	}
+	defer webcam.Close()
+
+	// Configura janela
+	window := setupWindow()
+	defer window.Close()
+
+	// Prepara buffer para frames
+	img := gocv.NewMat()
+	defer img.Close()
+
+	fmt.Println("🔍 YOLOv11 Object365 Detection - Detecção de 365 objetos")
+	fmt.Println("🌍 Detecta pessoas, veículos, móveis, comida, animais e muito mais")
+	fmt.Println("📱 Pressione ESC ou Q para sair")
+
+	// Loop principal de detecção
+	for {
+		// Captura frame
+		if ok := webcam.Read(&img); !ok {
+			fmt.Println("❌ Erro ao ler da webcam")
+			break
+		}
+
+		if img.Empty() {
+			continue
+		}
+
+		// Executa detecção
+		detections := detector.Detect(img)
+
+		// Desenha resultados
+		DrawDetections(&img, detections)
+
+		// Mostra na janela
+		window.IMShow(img)
+
+		// Verifica se deve sair
+		if handleInput(window) {
+			break
+		}
+	}
+
+	fmt.Println("👋 Aplicação encerrada")
 }

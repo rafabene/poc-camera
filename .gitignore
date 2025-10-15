@@ -31,6 +31,5 @@ Thumbs.db
 *.tmp
 *.temp
 
-# Modelos grandes (opcional - descomente se não quiser versionar)
-# models/*.weights
-# models/*.onnx
+# Modelos grandes - não versionar
+models/

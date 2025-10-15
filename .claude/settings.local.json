@@ -21,7 +21,13 @@
       "Bash(pip3 install:*)",
       "Bash(./poc-camera:*)",
       "WebFetch(domain:docs.ultralytics.com)",
-      "Bash(pip3:*)"
+      "Bash(pip3:*)",
+      "mcp__browsermcp__browser_click",
+      "Bash(chmod:*)",
+      "Bash(./use_object365.sh:*)",
+      "Bash(./ajustar_precisao.sh:*)",
+      "Bash(rm:*)",
+      "Bash(./download_models.sh:*)"
     ],
     "deny": [],
     "ask": []

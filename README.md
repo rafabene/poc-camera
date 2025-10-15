@@ -1,63 +1,159 @@
-# Prova de Conceito: Detecção de Objetos na Mão com Go e OpenCV
+# POC Camera - YOLOv11 Object365 Detection
 
-Este projeto é uma Prova de Conceito (PoC) que utiliza a linguagem Go, a biblioteca GoCV (bindings de Go para OpenCV) e o modelo de IA YOLOv3-tiny para detectar objetos em tempo real através de uma webcam.
+Este projeto é uma Prova de Conceito (PoC) que utiliza **Go**, **GoCV** (OpenCV para Go) e o modelo **YOLOv11 Object365** para detectar objetos em tempo real através de uma webcam.
 
-O objetivo final é identificar qual objeto está sendo segurado por uma pessoa.
+O sistema é capaz de detectar **365 categorias diferentes de objetos** usando o dataset Object365, oferecendo detecção muito mais abrangente que modelos tradicionais.
 
-## Pré-requisitos
+## 🎯 Características
+
+- **YOLOv11**: Última versão do YOLO com melhor precisão e velocidade
+- **Object365**: Dataset com 365 classes de objetos (vs 80 do COCO tradicional)
+- **Detecção em tempo real**: Processamento via webcam
+- **Otimizado**: Modelo ONNX para inferência rápida
+- **Multilíngue**: Classes em português e inglês
+
+## 📋 Pré-requisitos
 
 Antes de começar, você precisará ter os seguintes softwares instalados:
 
--   [Go](https://golang.org/dl/) (versão 1.18 ou superior)
--   [OpenCV](https://opencv.org/) (versão 4.x)
--   `pkg-config`
+- **[Go](https://golang.org/dl/)** (versão 1.18 ou superior)
+- **[OpenCV](https://opencv.org/)** (versão 4.x)
+- **Python 3** (para download e conversão de modelos)
+- **pkg-config**
 
-### Instalação no macOS
+### 🍎 Instalação no macOS
 
-A maneira mais fácil de instalar as dependências no macOS é usando o [Homebrew](https://brew.sh/):
+```bash
+# Instalar dependências via Homebrew
+brew install opencv pkg-config python3
 
-```sh
-brew install opencv pkg-config
+# Instalar ultralytics para conversão de modelos
+pip3 install ultralytics
 ```
 
-## Instalação do Projeto
+### 🐧 Instalação no Linux (Ubuntu/Debian)
 
-1.  **Clone o repositório (ou use os arquivos existentes).**
+```bash
+# Instalar dependências
+sudo apt-get update
+sudo apt-get install libopencv-dev pkg-config python3 python3-pip
 
-2.  **Baixe as dependências do Go:**
-    O Go irá baixar as dependências automaticamente ao executar o projeto.
+# Instalar ultralytics
+pip3 install ultralytics
+```
 
-3.  **Baixe os arquivos do modelo YOLO:**
-    Os arquivos do modelo são necessários para a detecção de objetos. Se o diretório `models` ainda não existir com os arquivos, crie-o e baixe os arquivos:
-    ```sh
-    mkdir models
-    curl -L -o models/yolov3-tiny.weights https://pjreddie.com/media/files/yolov3-tiny.weights
-    curl -L -o models/yolov3-tiny.cfg https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3-tiny.cfg
-    curl -L -o models/coco.names https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
-    ```
+## 🚀 Instalação e Uso
 
-## Como Executar
+### 1. Clone o repositório
 
-Com o `Makefile` fornecido, você pode simplesmente usar o comando:
+```bash
+git clone <repository-url>
+cd poc-camera
+```
 
-```sh
+### 2. Download automático dos modelos
+
+Execute o script de download que baixa automaticamente o modelo YOLOv11 Object365:
+
+```bash
+./download_models.sh
+```
+
+Este script irá:
+- ✅ Baixar modelo YOLOv11 Object365 (365 classes) do Hugging Face
+- ✅ Converter automaticamente para formato ONNX
+- ✅ Criar arquivos de classes em português e inglês
+- ✅ Configurar tudo automaticamente
+
+### 3. Executar a aplicação
+
+```bash
 make run
 ```
 
-Alternativamente, você pode usar o comando padrão do Go:
+Ou diretamente:
 
-```sh
+```bash
 go run main.go
 ```
 
-### ⚠️ Permissão da Câmera no macOS
+## 🎮 Controles
 
-Na primeira vez que você executar o programa, o macOS pode solicitar permissão para que seu terminal acesse a câmera. Se isso não acontecer automaticamente, você precisará ir em:
+- **ESC** ou **Q**: Sair da aplicação
+- A detecção acontece automaticamente em tempo real
 
-`Preferências do Sistema > Privacidade e Segurança > Câmera`
+### ⚠️ Permissões no macOS
 
-E habilitar o acesso para o seu aplicativo de terminal (ex: Terminal, iTerm2).
+Na primeira execução, o macOS solicitará permissão para acessar a câmera. Se não aparecer automaticamente:
 
-## Próximos Passos
+`Configurações do Sistema > Privacidade e Segurança > Câmera`
 
-O código atual detecta objetos genéricos. O próximo passo é adicionar um segundo modelo para detectar a **mão** e então criar a lógica que verifica quando a caixa de detecção de um objeto se sobrepõe à caixa de detecção da mão.
+Habilite o acesso para seu terminal (Terminal, iTerm2, etc.).
+
+## 📊 O que o Sistema Detecta
+
+O modelo Object365 pode identificar **365 categorias** diferentes de objetos, incluindo:
+
+### 👥 Pessoas e Vestuário
+- Pessoas, tênis, chapéu, óculos, bolsa, etc.
+
+### 🚗 Veículos
+- Carros, ônibus, motocicletas, aviões, barcos, etc.
+
+### 🏠 Casa e Móveis
+- Cadeiras, mesas, sofás, camas, TVs, etc.
+
+### 🍎 Comida e Bebida
+- Frutas, pizza, sanduíches, bebidas, etc.
+
+### 🐕 Animais
+- Cachorros, gatos, cavalos, pássaros, etc.
+
+### 📱 Eletrônicos
+- Celulares, laptops, câmeras, etc.
+
+### ⚽ Esportes e Lazer
+- Bolas, raquetes, skates, etc.
+
+*E muito mais! Veja os arquivos `models/object365.names` ou `models/object365_real.names` para a lista completa.*
+
+## 🛠️ Estrutura do Projeto
+
+```
+poc-camera/
+├── main.go                 # Código principal da aplicação
+├── download_models.sh      # Script de download automático
+├── Makefile               # Comandos de build e execução
+├── models/                # Modelos e arquivos de classes (criado automaticamente)
+│   ├── yolo11n_object365.pt    # Modelo PyTorch
+│   ├── yolo11n_object365.onnx  # Modelo ONNX otimizado
+│   ├── object365.names         # Classes em português
+│   └── object365_real.names    # Classes em inglês
+└── README.md              # Este arquivo
+```
+
+## 🔧 Comandos Makefile
+
+```bash
+make run    # Executar aplicação
+make build  # Compilar binário
+make clean  # Limpar arquivos de build
+make help   # Mostrar ajuda
+```
+
+## 🏆 Vantagens do Object365
+
+| Aspecto | COCO (tradicional) | Object365 (este projeto) |
+|---------|-------------------|---------------------------|
+| **Classes** | 80 | **365** |
+| **Variedade** | Básica | **Muito abrangente** |
+| **Precisão** | Boa | **Excelente** |
+| **Casos de uso** | Limitado | **Amplo** |
+
+## 📝 Próximos Passos
+
+- 🎯 Adicionar detecção de mãos/gestos
+- 🎨 Melhorar interface visual
+- 📊 Adicionar métricas de performance
+- 🔄 Suporte a múltiplas câmeras
+- 💾 Gravação de detecções
