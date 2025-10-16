@@ -28,8 +28,13 @@ Thumbs.db
 *.log
 
 # Arquivos temporários
+
 *.tmp
+
 *.temp
 
-# Modelos grandes - não versionar
-models/
+
+
+# Ambiente virtual Python
+
+.venv/
