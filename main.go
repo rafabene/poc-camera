@@ -7,25 +7,21 @@ import (
 	"image/color"
 	"math"
 	"os"
+	"runtime"
+	"time"
 
 	"gocv.io/x/gocv"
+	"poc-camera/config"
+	"poc-camera/internal/shoplifting"
 )
 
-// Configuração do modelo YOLOv11 Object365
-const (
-	modelWeights        = "models/yolo11n_object365.onnx"
-	classNamesFile      = "models/object365.names"
-	confidenceThreshold = 0.25 // Threshold para detectar objetos
-	nmsThreshold        = 0.4  // NMS padrão
-	minObjectSize       = 20   // Tamanho mínimo dos objetos
-	maxValidClassID     = 364  // Object365: 365 classes (0-364)
+func init() {
+	// Lock thread for macOS OpenCV compatibility
+	runtime.LockOSThread()
+}
 
-	// Configurações da aplicação
-	windowName    = "POC Camera - YOLOv11 Object365 Detection"
-	inputSize     = 640    // Tamanho da entrada do modelo
-	numDetections = 8400   // Número de detecções do YOLOv11
-	numAttributes = 369    // 4 coordenadas + 365 classes Object365
-)
+// Variável global para configuração
+var appConfig *config.Config
 
 // DetectionResult representa uma detecção de objeto
 type DetectionResult struct {
@@ -39,14 +35,44 @@ type DetectionResult struct {
 type YOLODetector struct {
 	net        gocv.Net
 	classNames []string
+	config     *config.Config
+}
+
+// YOLODetectorAdapter adapta YOLODetector para shoplifting.ObjectDetector
+type YOLODetectorAdapter struct {
+	detector *YOLODetector
+}
+
+// NewYOLODetectorAdapter cria novo adapter
+func NewYOLODetectorAdapter(detector *YOLODetector) *YOLODetectorAdapter {
+	return &YOLODetectorAdapter{detector: detector}
+}
+
+// Detect implementa a interface shoplifting.ObjectDetector
+func (adapter *YOLODetectorAdapter) Detect(img gocv.Mat) []shoplifting.DetectionResult {
+	// Chama o detector original
+	originalResults := adapter.detector.Detect(img)
+
+	// Converte para o tipo do package shoplifting
+	var results []shoplifting.DetectionResult
+	for _, orig := range originalResults {
+		results = append(results, shoplifting.DetectionResult{
+			ClassID:    orig.ClassID,
+			Confidence: orig.Confidence,
+			Box:        orig.Box,
+			Label:      orig.Label,
+		})
+	}
+
+	return results
 }
 
 // NewYOLODetector cria um novo detector YOLO
-func NewYOLODetector() (*YOLODetector, error) {
+func NewYOLODetector(cfg *config.Config) (*YOLODetector, error) {
 	// Carrega a rede neural
-	net := gocv.ReadNetFromONNX(modelWeights)
+	net := gocv.ReadNetFromONNX(cfg.ObjectDetectionModel)
 	if net.Empty() {
-		return nil, fmt.Errorf("erro ao carregar modelo: %s", modelWeights)
+		return nil, fmt.Errorf("erro ao carregar modelo: %s", cfg.ObjectDetectionModel)
 	}
 
 	// Configura backend e target
@@ -58,7 +84,7 @@ func NewYOLODetector() (*YOLODetector, error) {
 	}
 
 	// Carrega nomes das classes
-	classNames, err := loadClassNames(classNamesFile)
+	classNames, err := loadClassNames(cfg.ClassNamesFile)
 	if err != nil {
 		return nil, fmt.Errorf("erro ao carregar classes: %v", err)
 	}
@@ -66,6 +92,7 @@ func NewYOLODetector() (*YOLODetector, error) {
 	return &YOLODetector{
 		net:        net,
 		classNames: classNames,
+		config:     cfg,
 	}, nil
 }
 
@@ -77,7 +104,7 @@ func (d *YOLODetector) Close() {
 // Detect executa detecção em uma imagem
 func (d *YOLODetector) Detect(img gocv.Mat) []DetectionResult {
 	// Prepara entrada para o modelo
-	blob := gocv.BlobFromImage(img, 1.0/255.0, image.Pt(inputSize, inputSize),
+	blob := gocv.BlobFromImage(img, 1.0/255.0, image.Pt(d.config.InputSize, d.config.InputSize),
 		gocv.NewScalar(0, 0, 0, 0), true, false)
 	defer blob.Close()
 
@@ -95,11 +122,11 @@ func (d *YOLODetector) processDetections(output gocv.Mat, frameWidth, frameHeigh
 	data, _ := output.DataPtrFloat32()
 
 	var rawDetections []DetectionResult
-	scaleX := float32(frameWidth) / float32(inputSize)
-	scaleY := float32(frameHeight) / float32(inputSize)
+	scaleX := float32(frameWidth) / float32(d.config.InputSize)
+	scaleY := float32(frameHeight) / float32(d.config.InputSize)
 
 	// Processa todas as detecções
-	for i := 0; i < numDetections; i++ {
+	for i := 0; i < d.config.NumDetections; i++ {
 		detection := d.parseDetection(data, i, scaleX, scaleY, frameWidth, frameHeight)
 		if detection != nil {
 			rawDetections = append(rawDetections, *detection)
@@ -113,16 +140,16 @@ func (d *YOLODetector) processDetections(output gocv.Mat, frameWidth, frameHeigh
 // parseDetection extrai uma detecção individual dos dados brutos
 func (d *YOLODetector) parseDetection(data []float32, index int, scaleX, scaleY float32, frameWidth, frameHeight int) *DetectionResult {
 	// Extrai coordenadas (formato transposto)
-	centerX := data[0*numDetections + index]
-	centerY := data[1*numDetections + index]
-	width := data[2*numDetections + index]
-	height := data[3*numDetections + index]
+	centerX := data[0*d.config.NumDetections + index]
+	centerY := data[1*d.config.NumDetections + index]
+	width := data[2*d.config.NumDetections + index]
+	height := data[3*d.config.NumDetections + index]
 
 	// Encontra classe com maior confiança
 	classID, confidence := d.findBestClass(data, index)
 
 	// Valida detecção
-	if classID < 0 || classID > maxValidClassID || confidence < confidenceThreshold {
+	if classID < 0 || classID > d.config.MaxValidClassID || confidence < d.config.ConfidenceThreshold {
 		return nil
 	}
 
@@ -131,7 +158,7 @@ func (d *YOLODetector) parseDetection(data []float32, index int, scaleX, scaleY 
 		scaleX, scaleY, frameWidth, frameHeight)
 
 	// Filtra objetos muito pequenos
-	if box.Dx() < minObjectSize || box.Dy() < minObjectSize {
+	if box.Dx() < d.config.MinObjectSize || box.Dy() < d.config.MinObjectSize {
 		return nil
 	}
 
@@ -153,15 +180,14 @@ func (d *YOLODetector) findBestClass(data []float32, index int) (int, float32) {
 
 	// Verifica se temos dados suficientes
 	dataLength := len(data)
-	maxIndex := (numAttributes - 1) * numDetections + index
+	maxIndex := (d.config.NumAttributes - 1) * d.config.NumDetections + index
 
 	if maxIndex >= dataLength {
-		// Se não temos dados suficientes, retorna valores padrão
 		return 0, 0.0
 	}
 
-	for j := 4; j < numAttributes; j++ {
-		dataIndex := j*numDetections + index
+	for j := 4; j < d.config.NumAttributes; j++ {
+		dataIndex := j*d.config.NumDetections + index
 		if dataIndex < dataLength {
 			score := data[dataIndex]
 			if score > maxScore {
@@ -211,7 +237,7 @@ func (d *YOLODetector) applyNMS(detections []DetectionResult) []DetectionResult 
 	}
 
 	// Aplica NMS
-	indices := gocv.NMSBoxes(boxes, confidences, confidenceThreshold, nmsThreshold)
+	indices := gocv.NMSBoxes(boxes, confidences, d.config.ConfidenceThreshold, d.config.NMSThreshold)
 
 	// Retorna apenas detecções válidas
 	var result []DetectionResult
@@ -287,18 +313,36 @@ func loadClassNames(filename string) ([]string, error) {
 	return lines, scanner.Err()
 }
 
-// setupCamera inicializa e configura a câmera
+// setupCamera inicializa e configura a câmera (com fallback para múltiplos índices)
 func setupCamera() (*gocv.VideoCapture, error) {
-	webcam, err := gocv.VideoCaptureDevice(0)
-	if err != nil {
-		return nil, fmt.Errorf("erro ao abrir webcam: %v", err)
+	// Tenta diferentes índices de câmera
+	for i := 0; i < 4; i++ {
+		fmt.Printf("🔍 Tentando câmera índice %d...\n", i)
+		webcam, err := gocv.VideoCaptureDevice(i)
+		if err != nil {
+			fmt.Printf("❌ Câmera %d: %v\n", i, err)
+			continue
+		}
+
+		// Testa se consegue capturar um frame
+		testImg := gocv.NewMat()
+		if ok := webcam.Read(&testImg); ok && !testImg.Empty() {
+			testImg.Close()
+			fmt.Printf("✅ Câmera %d funcionando!\n", i)
+			return webcam, nil
+		}
+
+		testImg.Close()
+		webcam.Close()
+		fmt.Printf("⚠️  Câmera %d não consegue capturar frames\n", i)
 	}
-	return webcam, nil
+
+	return nil, fmt.Errorf("nenhuma câmera funcional encontrada (testados índices 0-3)")
 }
 
 // setupWindow cria e configura a janela de visualização
-func setupWindow() *gocv.Window {
-	window := gocv.NewWindow(windowName)
+func setupWindow(title string) *gocv.Window {
+	window := gocv.NewWindow(title)
 	window.SetWindowProperty(gocv.WindowPropertyFullscreen, gocv.WindowNormal)
 	return window
 }
@@ -336,33 +380,62 @@ func min(a, b int) int {
 }
 
 func main() {
-	// Inicializa detector
-	detector, err := NewYOLODetector()
+	// Configuração para shoplifting detection
+	appConfig = config.DefaultConfig()
+	runShopliftingDetection()
+}
+
+// runShopliftingDetection executa detecção de shoplifting
+func runShopliftingDetection() {
+	// Inicializa detector de objetos base
+	objectDetector, err := NewYOLODetector(appConfig)
 	if err != nil {
-		fmt.Printf("Erro ao inicializar detector: %v\n", err)
+		fmt.Printf("❌ Erro ao inicializar detector de objetos: %v\n", err)
 		os.Exit(1)
 	}
-	defer detector.Close()
+	defer objectDetector.Close()
+
+	// Cria adapter para o detector YOLO
+	detectorAdapter := NewYOLODetectorAdapter(objectDetector)
+
+	// Inicializa detector de shoplifting integrado
+	shopliftingDetector, err := shoplifting.NewShopliftingDetector(detectorAdapter, appConfig)
+	if err != nil {
+		fmt.Printf("❌ Erro ao inicializar detector de shoplifting: %v\n", err)
+		os.Exit(1)
+	}
+	defer shopliftingDetector.Close()
 
 	// Configura câmera
 	webcam, err := setupCamera()
 	if err != nil {
-		fmt.Printf("Erro na câmera: %v\n", err)
+		fmt.Printf("❌ Erro na câmera: %v\n", err)
 		os.Exit(1)
 	}
 	defer webcam.Close()
 
 	// Configura janela
-	window := setupWindow()
+	window := setupWindow(appConfig.WindowName)
 	defer window.Close()
 
 	// Prepara buffer para frames
 	img := gocv.NewMat()
 	defer img.Close()
 
-	fmt.Println("🔍 YOLOv11 Object365 Detection - Detecção de 365 objetos")
-	fmt.Println("🌍 Detecta pessoas, veículos, móveis, comida, animais e muito mais")
+	// Informações iniciais
+	fmt.Println("🛡️  SHOPLIFTING DETECTOR ATIVO")
+	fmt.Println("🤖 YOLO v11 + Pose Estimation")
+	fmt.Println("👥 Detecta pessoas e comportamentos suspeitos")
+	fmt.Println("🚨 Alertas em tempo real para:")
+	fmt.Println("   • Pessoas vagueando por muito tempo")
+	fmt.Println("   • Posições suspeitas (agachado, escondido)")
+	fmt.Println("   • Proximidade com itens valiosos")
+	fmt.Println("   • Movimentos de ocultação")
 	fmt.Println("📱 Pressione ESC ou Q para sair")
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+	frameCount := 0
+	alertCount := 0
 
 	// Loop principal de detecção
 	for {
@@ -376,20 +449,88 @@ func main() {
 			continue
 		}
 
-		// Executa detecção
-		detections := detector.Detect(img)
+		frameCount++
 
-		// Desenha resultados
-		DrawDetections(&img, detections)
+		// Executa detecção de shoplifting
+		detections, suspiciousBehaviors := shopliftingDetector.DetectShoplifting(img)
+
+		// Conta alertas
+		if len(suspiciousBehaviors) > 0 {
+			alertCount += len(suspiciousBehaviors)
+
+			// Log dos comportamentos suspeitos
+			for _, behavior := range suspiciousBehaviors {
+				fmt.Printf("🚨 ALERTA: %s (Confiança: %.1f%%) - %s\n",
+					behavior.Type, behavior.Confidence*100, behavior.Description)
+			}
+		}
+
+		// Desenha resultados na imagem
+		shoplifting.DrawShopliftingDetections(&img, detections, suspiciousBehaviors)
+
+		// Desenha poses se disponíveis (debug visual)
+		if len(detections) > 0 {
+			// Obtém poses da última detecção para visualização
+			poses := shopliftingDetector.GetLastPoses()
+			shoplifting.DrawPoseKeypoints(&img, poses)
+		}
+
+		// Adiciona informações de status na imagem
+		addStatusInfo(&img, frameCount, len(detections), len(suspiciousBehaviors), alertCount)
 
 		// Mostra na janela
 		window.IMShow(img)
 
-		// Verifica se deve sair
+		// Verifica input do usuário
 		if handleInput(window) {
 			break
 		}
 	}
 
-	fmt.Println("👋 Aplicação encerrada")
+	// Estatísticas finais
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Printf("📊 ESTATÍSTICAS FINAIS:\n")
+	fmt.Printf("   • Frames processados: %d\n", frameCount)
+	fmt.Printf("   • Total de alertas: %d\n", alertCount)
+	fmt.Printf("   • Taxa de alertas: %.2f%%\n", float64(alertCount)/float64(frameCount)*100)
+	fmt.Println("👋 Detector de shoplifting encerrado")
+}
+
+// addStatusInfo adiciona informações de status na imagem
+func addStatusInfo(img *gocv.Mat, frameCount, detectionCount, alertCount, totalAlerts int) {
+	// Painel de informações no topo
+	statusText := fmt.Sprintf("Frame: %d | Deteccoes: %d | Alertas Ativos: %d | Total: %d",
+		frameCount, detectionCount, alertCount, totalAlerts)
+
+	// Fundo semi-transparente para o texto
+	gocv.Rectangle(img,
+		image.Rect(0, 0, img.Cols(), 60),
+		color.RGBA{0, 0, 0, 180}, -1)
+
+	// Texto de status
+	gocv.PutText(img, statusText,
+		image.Pt(10, 25),
+		gocv.FontHersheySimplex, 0.6,
+		color.RGBA{255, 255, 255, 255}, 2)
+
+	// Indicador de status (verde = normal, vermelho = alerta)
+	statusColor := color.RGBA{0, 255, 0, 255} // Verde
+	statusIcon := "🟢 NORMAL"
+
+	if alertCount > 0 {
+		statusColor = color.RGBA{255, 0, 0, 255} // Vermelho
+		statusIcon = "🔴 ALERTA"
+	}
+
+	gocv.PutText(img, statusIcon,
+		image.Pt(10, 50),
+		gocv.FontHersheySimplex, 0.6,
+		statusColor, 2)
+
+	// Timestamp
+	currentTime := time.Now().Format("15:04:05")
+	gocv.PutText(img, currentTime,
+		image.Pt(img.Cols()-100, 25),
+		gocv.FontHersheySimplex, 0.6,
+		color.RGBA{255, 255, 255, 255}, 2)
 }

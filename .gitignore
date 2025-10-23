@@ -1,5 +1,6 @@
 # Binários
 poc-camera
+poc-camera-dev
 *.exe
 
 # Arquivos de build do Go
@@ -26,15 +27,25 @@ Thumbs.db
 
 # Logs
 *.log
+logs/
 
 # Arquivos temporários
-
 *.tmp
-
 *.temp
 
-
-
 # Ambiente virtual Python
-
 .venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Modelos grandes (opcionalmente)
+# models/*.pt
+# models/*.onnx
+
+# Backups
+*.bak
+*.backup
+
+# Arquivos de configuração local
+config.local.*

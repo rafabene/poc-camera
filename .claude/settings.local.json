@@ -27,7 +27,12 @@
       "Bash(./use_object365.sh:*)",
       "Bash(./ajustar_precisao.sh:*)",
       "Bash(rm:*)",
-      "Bash(./download_models.sh:*)"
+      "Bash(./download_models.sh:*)",
+      "Bash(make:*)",
+      "Bash(go mod:*)",
+      "Bash(tree:*)",
+      "Read(//dev/**)",
+      "Bash(system_profiler:*)"
     ],
     "deny": [],
     "ask": []
