@@ -1,15 +1,14 @@
 # 🛡️ POC Camera - Shoplifting Detection
 
-Sistema avançado de **detecção de shoplifting** usando **YOLO v11 Object365** + **Pose Estimation** em tempo real.
+Sistema avançado de **detecção de shoplifting** usando **YOLO v11 Object365** em tempo real.
 
-Este projeto utiliza **Go**, **GoCV** (OpenCV para Go), **YOLOv11 Object365** e **YOLOv11 Pose** para detectar comportamentos suspeitos de shoplifting através de análise visual inteligente.
+Este projeto utiliza **Go**, **GoCV** (OpenCV para Go) e **YOLOv11 Object365** para detectar comportamentos suspeitos de shoplifting através de análise visual inteligente baseada em detecção de objetos e rastreamento comportamental.
 
 ## 🎯 Funcionalidades
 
 - **🤖 YOLO v11 Object365**: Detecta 365 classes diferentes de objetos
-- **🧘 YOLO v11 Pose Estimation**: Analisa poses e posturas corporais (17 keypoints COCO)
 - **👥 Tracking de Pessoas**: Rastreamento temporal de pessoas na cena
-- **🚨 Detecção de Comportamentos Suspeitos**: Análise comportamental avançada
+- **🚨 Detecção de Comportamentos Suspeitos**: Análise comportamental baseada em movimento e proximidade
 - **⏰ Detecção em Tempo Real**: Processamento via webcam com alertas instantâneos
 - **📊 Interface Visual Inteligente**: Alertas visuais e estatísticas em tempo real
 - **⚙️ Arquitetura Modular**: Configuração centralizada e extensível
@@ -21,10 +20,10 @@ O sistema analisa em tempo real os seguintes comportamentos suspeitos:
 ### 🕵️ Análise Comportamental
 - **⏰ Loitering (Vagueação)**: Pessoas permanecendo na área por tempo excessivo
 - **🤏 Proximidade com Itens Valiosos**: Detecção de proximidade suspeita com produtos de alto valor
-- **🧘 Poses Suspeitas**: Análise de posturas corporais indicativas de comportamento furtivo
-  - Pessoa agachada/escondida
-  - Posições de ocultação de objetos
-  - Movimentos suspeitos dos braços/mãos
+- **🔄 Movimentos Suspeitos**: Análise de padrões de movimento indicativos de comportamento furtivo
+  - Movimentos erráticos com muitas mudanças de direção
+  - Padrões circulares repetitivos em área pequena
+  - Velocidade inconsistente de movimento
 
 ### 🎯 Itens Valiosos Monitorados
 - **📱 Eletrônicos**: Telefones, notebooks, tablets, câmeras, fones
@@ -196,12 +195,11 @@ poc-camera/
 ├── main.go                       # Ponto de entrada principal + detecção de objetos
 ├── internal/                     # Pacotes internos
 │   └── shoplifting/              # Sistema de detecção de shoplifting
-│       └── shoplifting.go        # Lógica completa de shoplifting + YOLO pose integration
+│       └── shoplifting.go        # Lógica completa de shoplifting detection
 ├── config/                       # Configurações
 │   └── config.go                 # Configurações centralizadas + parâmetros de shoplifting
 ├── models/                       # Modelos de ML
 │   ├── yolo11n_object365.onnx    # Detecção de objetos (365 classes)
-│   ├── yolo11n-pose.onnx         # YOLO v11 pose estimation (17 keypoints)
 │   ├── yolo11n_object365.pt      # Modelo PyTorch original (objetos)
 │   ├── object365.names           # Classes em português
 │   └── object365_real.names      # Classes em inglês (backup)
@@ -224,12 +222,12 @@ make help   # Mostrar ajuda
 
 | Aspecto | Detecção Simples | Este Sistema (Shoplifting) |
 |---------|------------------|----------------------------|
-| **Modelos** | Apenas objetos | **Objetos + Pose Estimation** |
+| **Modelos** | Apenas objetos | **Objetos especializados** |
 | **Análise** | Estática | **Comportamental temporal** |
 | **Alertas** | Nenhum | **Tempo real + Inteligentes** |
 | **Tracking** | Não | **Rastreamento de pessoas** |
 | **Classes** | 80 (COCO) | **365 (Object365)** |
-| **Keypoints** | Não | **17 pontos corporais (COCO)** |
+| **Análise de Movimento** | Não | **Padrões suspeitos detectados** |
 | **Casos de uso** | Geral | **Segurança especializada** |
 
 ## 🎛️ Configurações
@@ -242,19 +240,16 @@ NMSThreshold:        0.4   // Non-Maximum Suppression
 MinObjectSize:       20    // Tamanho mínimo dos objetos em pixels
 
 // Shoplifting Detection
-SuspiciousPoseThreshold:    0.6   // Limiar para pose suspeita
 HidingBehaviorThreshold:    0.7   // Limiar para comportamento de ocultação
-LoiteringTimeThreshold:     10.0  // Tempo limite para vagueação (segundos)
+LoiteringTimeThreshold:     20.0  // Tempo limite para vagueação (segundos)
 ProximityThreshold:         80.0  // Distância para proximidade suspeita (pixels)
 
 // Tracking
 MaxTrackedPeople: 50     // Máximo de pessoas rastreadas simultaneamente
-MaxPoseHistory:   30     // Histórico de poses (~1 segundo a 30fps)
 TrackerTimeout:   5.0    // Timeout para remover pessoa (segundos)
 
 // Modelos
 ObjectDetectionModel: "models/yolo11n_object365.onnx"
-PoseEstimationModel:  "models/yolo11n-pose.onnx"
 ClassNamesFile:       "models/object365.names"
 
 // Interface
@@ -267,16 +262,15 @@ NumAttributes:   369    // 4 coordenadas + 365 classes Object365
 
 ### Requisitos de Hardware
 - **CPU**: Intel i5 / Apple M1 ou superior (recomendado M2/M3 para melhor performance)
-- **RAM**: 12GB mínimo, 16GB recomendado (duplo modelo + tracking)
+- **RAM**: 8GB mínimo, 12GB recomendado (modelo único + tracking)
 - **Câmera**: Webcam 720p mínimo, 1080p recomendado
-- **Storage**: 500MB para modelos ONNX
+- **Storage**: 300MB para modelos ONNX
 
 ### Métricas Típicas
-- **FPS**: 15-30 FPS (otimizado com YOLO nativo)
-- **Latência**: < 80ms para detecção completa (objetos + pose + análise)
+- **FPS**: 20-40 FPS (otimizado com YOLO único)
+- **Latência**: < 50ms para detecção completa (objetos + análise)
 - **Precisão Objetos**: 85-95% para detecção de objetos (Object365)
-- **Precisão Pose**: 85-95% para estimação de pose YOLO (17 keypoints)
-- **Precisão Comportamental**: 75-90% para detecção de shoplifting
+- **Precisão Comportamental**: 75-90% para detecção de shoplifting baseada em movimento
 - **Tracking Accuracy**: 90-95% para rastreamento de pessoas
 
 ## 🆘 Solução de Problemas
@@ -290,14 +284,14 @@ make run        # ✅ Recomendado
 go run *.go     # ✅ Também funciona agora
 ```
 
-### ✅ Pose Estimation: YOLO v11 Ativo
-**Status**: ✅ **Sistema completo com YOLO v11 Pose**
-- **Tecnologia**: YOLO v11 Pose nativo (ONNX)
-- **Modelo**: YOLO v11n Pose (17 keypoints COCO)
-- **Performance**: ~15ms por detecção de pose (2x mais rápido)
-- **Compatibilidade**: Fallback inteligente para OpenCV
-- **Mensagem esperada**: `✅ Pose estimation habilitado (YOLO v11)`
-- **Resultado**: Sistema completo com análise de poses corporais de alta performance
+### ✅ Sistema Otimizado: Object Detection Puro
+**Status**: ✅ **Sistema otimizado sem pose detection**
+- **Tecnologia**: YOLO v11 Object365 (ONNX)
+- **Modelo**: YOLO v11n Object365 (365 classes)
+- **Performance**: ~30-50ms por frame completo (mais rápido)
+- **Análise**: Baseada em movimento e proximidade
+- **Mensagem esperada**: `✅ Sistema funcionando com: • Detecção de objetos (365 classes)`
+- **Resultado**: Sistema mais rápido e eficiente para detecção de shoplifting
 
 ### Baixa Performance
 **Soluções**:
@@ -313,5 +307,5 @@ go run *.go     # ✅ Também funciona agora
 
 ---
 
-**🛡️ POC Camera - Shoplifting Detection com YOLO v11 + Pose Estimation**
-*Sistema inteligente de detecção de comportamentos suspeitos em tempo real*
+**🛡️ POC Camera - Shoplifting Detection com YOLO v11 Object Detection**
+*Sistema inteligente de detecção de comportamentos suspeitos baseado em análise de movimento e proximidade*

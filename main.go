@@ -424,13 +424,12 @@ func runShopliftingDetection() {
 
 	// Informações iniciais
 	fmt.Println("🛡️  SHOPLIFTING DETECTOR ATIVO")
-	fmt.Println("🤖 YOLO v11 + Pose Estimation")
+	fmt.Println("🤖 YOLO v11 Object Detection")
 	fmt.Println("👥 Detecta pessoas e comportamentos suspeitos")
 	fmt.Println("🚨 Alertas em tempo real para:")
 	fmt.Println("   • Pessoas vagueando por muito tempo")
-	fmt.Println("   • Posições suspeitas (agachado, escondido)")
 	fmt.Println("   • Proximidade com itens valiosos")
-	fmt.Println("   • Movimentos de ocultação")
+	fmt.Println("   • Movimentos suspeitos")
 	fmt.Println("📱 Pressione ESC ou Q para sair")
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
@@ -458,22 +457,22 @@ func runShopliftingDetection() {
 		if len(suspiciousBehaviors) > 0 {
 			alertCount += len(suspiciousBehaviors)
 
-			// Log dos comportamentos suspeitos
+			// Log dos comportamentos suspeitos (apenas uma vez por segundo)
 			for _, behavior := range suspiciousBehaviors {
-				fmt.Printf("🚨 ALERTA: %s (Confiança: %.1f%%) - %s\n",
-					behavior.Type, behavior.Confidence*100, behavior.Description)
+				if behavior.ShouldLog {
+					if behavior.Details != "" {
+						fmt.Printf("🚨 ALERTA: %s (Confiança: %.1f%%) - %s\n   📊 Detalhes: %s\n",
+							behavior.Type, behavior.Confidence*100, behavior.Description, behavior.Details)
+					} else {
+						fmt.Printf("🚨 ALERTA: %s (Confiança: %.1f%%) - %s\n",
+							behavior.Type, behavior.Confidence*100, behavior.Description)
+					}
+				}
 			}
 		}
 
 		// Desenha resultados na imagem
 		shoplifting.DrawShopliftingDetections(&img, detections, suspiciousBehaviors)
-
-		// Desenha poses se disponíveis (debug visual)
-		if len(detections) > 0 {
-			// Obtém poses da última detecção para visualização
-			poses := shopliftingDetector.GetLastPoses()
-			shoplifting.DrawPoseKeypoints(&img, poses)
-		}
 
 		// Adiciona informações de status na imagem
 		addStatusInfo(&img, frameCount, len(detections), len(suspiciousBehaviors), alertCount)

@@ -4,7 +4,6 @@ package config
 type Config struct {
 	// Modelos
 	ObjectDetectionModel string
-	PoseEstimationModel  string
 	ClassNamesFile       string
 
 	// Thresholds de detecção
@@ -13,7 +12,6 @@ type Config struct {
 	MinObjectSize       int
 
 	// Configurações de shoplifting
-	SuspiciousPoseThreshold    float32
 	HidingBehaviorThreshold    float32
 	LoiteringTimeThreshold     float64
 	ProximityThreshold         float64
@@ -27,7 +25,6 @@ type Config struct {
 
 	// Performance
 	MaxTrackedPeople   int
-	MaxPoseHistory     int
 	TrackerTimeout     float64
 }
 
@@ -36,7 +33,6 @@ func DefaultConfig() *Config {
 	return &Config{
 		// Modelos
 		ObjectDetectionModel: "models/yolo11n_object365.onnx",
-		PoseEstimationModel:  "models/yolo11n-pose.onnx",
 		ClassNamesFile:       "models/object365.names",
 
 		// Thresholds de detecção
@@ -45,13 +41,12 @@ func DefaultConfig() *Config {
 		MinObjectSize:       20,
 
 		// Configurações de shoplifting
-		SuspiciousPoseThreshold:    0.8,  // Mais restritivo (era 0.6)
 		HidingBehaviorThreshold:    0.7,
-		LoiteringTimeThreshold:     10.0, // segundos
+		LoiteringTimeThreshold:     20.0, // segundos
 		ProximityThreshold:         80.0, // pixels
 
 		// Interface
-		WindowName:      "🛡️ Shoplifting Detector - YOLO v11 + Pose Estimation",
+		WindowName:      "🛡️ Shoplifting Detector - YOLO v11 Object Detection",
 		InputSize:       640,
 		NumDetections:   8400,
 		NumAttributes:   369, // 4 coordenadas + 365 classes Object365
@@ -59,7 +54,6 @@ func DefaultConfig() *Config {
 
 		// Performance
 		MaxTrackedPeople: 50,
-		MaxPoseHistory:   30, // ~1 segundo a 30fps
 		TrackerTimeout:   5.0, // segundos
 	}
 }
